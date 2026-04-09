@@ -1,0 +1,46 @@
+---
+description: Jira CLI integration via JJ — fetches tickets and lists stories automatically
+alwaysApply: false
+---
+
+# JJ — Jira integration
+
+JJ is a CLI tool that fetches Jira tickets and converts them to Markdown.
+
+## When the user mentions a Jira issue key (like WEB-1234, PROJ-56, etc.)
+
+Automatically fetch the ticket by running:
+
+```bash
+jj <KEY> --pipe
+```
+
+Use the full markdown output as context for the conversation. Do not ask the user if they want you to fetch it — just do it.
+
+## When the user asks to list their stories / assigned tickets / current sprint
+
+Run:
+
+```bash
+jj list --pipe
+```
+
+This returns tab-separated lines: `KEY  STATUS  ASSIGNEE  SUMMARY`
+
+If the user provides custom JQL, pass it:
+
+```bash
+jj list --pipe --jql "your jql here"
+```
+
+## Other useful commands
+
+- `jj sprint --pipe` — Sprint overview grouped by status with assignees
+- `jj whois <name> --pipe` — Issues assigned to a person in the current sprint
+- `jj search <text> --pipe` — Search issues by summary text
+
+## Notes
+
+- JJ reads credentials from `.env` in its install directory, or from env vars
+- The `--pipe` flag makes it non-interactive (no spinners, no prompts, clean stdout)
+- Without `--pipe`, the CLI is interactive — only use `--pipe` in agent context
