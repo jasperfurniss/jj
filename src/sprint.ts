@@ -107,10 +107,89 @@ function sprintToTerminal(overview: SprintOverview): string {
   return lines.join("\n");
 }
 
-export async function runSprint(pipe: boolean): Promise<void> {
-  if (pipe) {
+interface PersonIssues {
+  name: string;
+  items: { key: string; summary: string; status: string }[];
+}
+
+function groupByPerson(overview: SprintOverview): PersonIssues[] {
+  const byPerson: Record<string, { key: string; summary: string; status: string }[]> = {};
+
+  for (const col of COLUMNS) {
+    for (const issue of overview.columns[col]) {
+      const name = issue.assignee;
+      if (!byPerson[name]) byPerson[name] = [];
+      byPerson[name].push({
+        key: issue.key,
+        summary: issue.summary,
+        status: col,
+      });
+    }
+  }
+
+  return Object.entries(byPerson)
+    .map(([name, items]) => ({ name, items }))
+    .sort((a, b) => b.items.length - a.items.length);
+}
+
+function sprintByPersonToMarkdown(overview: SprintOverview): string {
+  const lines: string[] = [];
+  const dates = formatDates(overview.startDate, overview.endDate);
+  lines.push(`# ${overview.sprintName}${dates ? ` | ${dates}` : ""}`);
+  lines.push("");
+
+  const people = groupByPerson(overview);
+  let totalCount = 0;
+
+  for (const person of people) {
+    totalCount += person.items.length;
+    lines.push(`## ${person.name} (${person.items.length})`);
+    lines.push("");
+    for (const item of person.items) {
+      lines.push(`- **${item.key}** ${item.summary} _(${item.status})_`);
+    }
+    lines.push("");
+  }
+
+  lines.push(`---`);
+  lines.push(`Total: ${totalCount} issues`);
+
+  return lines.join("\n");
+}
+
+function sprintByPersonToTerminal(overview: SprintOverview): string {
+  const lines: string[] = [];
+  const dates = formatDates(overview.startDate, overview.endDate);
+  lines.push(
+    pc.bold(pc.cyan(overview.sprintName)) + (dates ? pc.dim(` | ${dates}`) : "")
+  );
+  lines.push("");
+
+  const people = groupByPerson(overview);
+  let totalCount = 0;
+
+  for (const person of people) {
+    totalCount += person.items.length;
+    lines.push(pc.bold(person.name) + pc.dim(` (${person.items.length})`));
+    for (const item of person.items) {
+      lines.push(
+        `  ${pc.cyan(item.key)} ${item.summary} ${pc.dim(`(${item.status})`)}`
+      );
+    }
+    lines.push("");
+  }
+
+  lines.push(pc.dim(`Total: ${totalCount} issues`));
+
+  return lines.join("\n");
+}
+
+export async function runSprint(opts: { pipe: boolean; byPerson: boolean }): Promise<void> {
+  if (opts.pipe) {
     const overview = await fetchSprintOverview();
-    process.stdout.write(sprintToMarkdown(overview));
+    process.stdout.write(
+      opts.byPerson ? sprintByPersonToMarkdown(overview) : sprintToMarkdown(overview)
+    );
     return;
   }
 
@@ -119,5 +198,7 @@ export async function runSprint(pipe: boolean): Promise<void> {
   const overview = await fetchSprintOverview();
   s.stop(`${overview.sprintName}`);
   console.log();
-  console.log(sprintToTerminal(overview));
+  console.log(
+    opts.byPerson ? sprintByPersonToTerminal(overview) : sprintToTerminal(overview)
+  );
 }

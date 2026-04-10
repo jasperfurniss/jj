@@ -505,6 +505,7 @@ async function main() {
       "  │ jj list --pipe               │ List issues (non-interactive, tab-separated)           │",
       "  │ jj board                     │ Interactive kanban board (move cards between columns)  │",
       "  │ jj sprint                    │ Sprint overview (issues by status + assignee)          │",
+      "  │ jj sprint --by-person        │ Sprint overview grouped by person                      │",
       "  │ jj sprint --pipe             │ Sprint overview as markdown                            │",
       "  │ jj summary                   │ Sprint roundup (auto-copies Slack format to clipboard)  │",
       "  │ jj summary --concise         │ Concise format (grouped by role)                       │",
@@ -568,7 +569,10 @@ async function main() {
   if (args[0] === "sprint") {
     if (!pipeFlag) printBanner();
     validateConfig();
-    await runSprint(pipeFlag);
+    await runSprint({
+      pipe: pipeFlag,
+      byPerson: args.includes("--by-person"),
+    });
     return;
   }
 
