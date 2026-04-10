@@ -9,25 +9,29 @@
 
 A fast, friendly CLI for Jira Cloud. Fetch tickets as markdown, manage your sprint board in the terminal, generate sprint summaries, and pipe everything into your AI coding agent.
 
+## Install
+
+```bash
+npm install -g get-jj
+```
+
 ## Setup
 
-1. Clone and build:
+1. Create a `.env` file in JJ's install directory, or set environment variables directly:
 
 ```bash
-git clone <repo-url> jj
-cd jj
-npm install
-npm run build
-npm link   # makes `jj` available globally
+# Find where JJ was installed, then create .env there:
+jj help  # shows install location in the banner
+
+# Or just set env vars in your shell profile:
+export JIRA_BASE_URL=https://yourcompany.atlassian.net
+export JIRA_EMAIL=you@example.com
+export JIRA_API_TOKEN=your-token-here
+export JIRA_PROJECT=WEB
+export JIRA_BOARD_ID=36
 ```
 
-2. Create your `.env` file:
-
-```bash
-cp .env.example .env
-```
-
-3. Fill in your credentials:
+2. You'll need these credentials:
 
 - **`JIRA_BASE_URL`** — Your Jira Cloud URL (e.g., `https://yourcompany.atlassian.net`)
 - **`JIRA_EMAIL`** — Your Jira account email
@@ -35,10 +39,21 @@ cp .env.example .env
 - **`JIRA_PROJECT`** — Your project key (e.g., `WEB`, `APP`, `ENG`)
 - **`JIRA_BOARD_ID`** — Find it in your board URL: `/jira/software/projects/WEB/boards/<ID>`
 
-4. Verify it works:
+3. Verify it works:
 
 ```bash
 jj list
+```
+
+### Install from source
+
+```bash
+git clone https://github.com/jasperfurniss/jj-cli.git
+cd jj-cli
+npm install
+npm run build
+npm link
+cp .env.example .env  # fill in your credentials
 ```
 
 ## Commands

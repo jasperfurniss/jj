@@ -1,15 +1,37 @@
 {
-    "name": "jj-cli",
+    "name": "get-jj",
     "version": "1.0.0",
-    "description": "Interactive CLI to convert Jira stories to Markdown",
+    "description": "JJ: your helpful jira buddy — a fast, friendly CLI for Jira Cloud",
     "type": "module",
     "bin": {
-        "jj": "./dist/cli.js"
+        "jj": "dist/cli.js"
     },
+    "files": [
+        "dist",
+        "skills"
+    ],
+    "keywords": [
+        "jira",
+        "cli",
+        "sprint",
+        "kanban",
+        "board",
+        "markdown",
+        "agile",
+        "scrum",
+        "project-management"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/jasperfurniss/jj-cli.git"
+    },
+    "author": "Jasper Furniss",
+    "license": "MIT",
     "scripts": {
         "build": "tsup src/cli.ts --format esm --dts --clean",
         "dev": "tsx src/cli.ts",
-        "test": "vitest run"
+        "test": "vitest run",
+        "prepublishOnly": "npm run build"
     },
     "dependencies": {
         "@clack/prompts": "^0.9.1",
