@@ -8,15 +8,6 @@ import {
 } from "./jira-client.js";
 import { mapStatus, COLUMNS } from "./board.js";
 
-interface GroupedIssues {
-  [group: string]: {
-    key: string;
-    summary: string;
-    assignee: string;
-    status: string;
-  }[];
-}
-
 function formatDate(d: string): string {
   return new Date(d).toLocaleDateString("en-US", {
     month: "short",
@@ -24,72 +15,78 @@ function formatDate(d: string): string {
   });
 }
 
-function groupByAssignee(issues: JiraIssue[]): GroupedIssues {
-  const grouped: GroupedIssues = {};
-  for (const issue of issues) {
-    const name = issue.fields.assignee?.displayName || "Unassigned";
-    if (!grouped[name]) grouped[name] = [];
-    grouped[name].push({
-      key: issue.key,
-      summary: issue.fields.summary,
-      assignee: name,
-      status: issue.fields.status.name,
-    });
-  }
-  return grouped;
-}
+/**
+ * Build a flat list of sprint priorities in Erin/Anna's style:
+ * each issue is one line with assignee mentioned inline.
+ * Excludes Done items — those aren't priorities.
+ */
+function buildPrioritiesList(issues: JiraIssue[]): {
+  slack: string;
+  terminal: string;
+} {
+  const lastCol = COLUMNS[COLUMNS.length - 1];
+  const active = issues.filter(
+    (i) => mapStatus(i.fields.status.name) !== lastCol
+  );
 
-function groupByComponent(issues: JiraIssue[]): GroupedIssues | null {
-  const roleKeywords: Record<string, string[]> = {
-    "Product & Content": ["product", "content"],
-    Development: ["dev", "development", "engineering", "eng"],
-    QA: ["qa", "quality", "test", "testing"],
-    Design: ["design", "ux", "ui"],
+  if (active.length === 0) {
+    return {
+      slack: "_No active issues in sprint_",
+      terminal: pc.dim("  No active issues in sprint"),
+    };
+  }
+
+  const slackLines: string[] = [];
+  const terminalLines: string[] = [];
+
+  for (const issue of active) {
+    const assignee = issue.fields.assignee?.displayName;
+    const status = issue.fields.status.name;
+    const assigneeSuffix = assignee ? ` \u2014 ${assignee}` : "";
+
+    slackLines.push(
+      `\u2022 ${issue.fields.summary}${assigneeSuffix} (${status})`
+    );
+    terminalLines.push(
+      `  ${pc.cyan(issue.key)} ${issue.fields.summary}${assignee ? pc.dim(` \u2014 ${assignee}`) : ""} ${pc.dim(`(${status})`)}`
+    );
+  }
+
+  return {
+    slack: slackLines.join("\n"),
+    terminal: terminalLines.join("\n"),
   };
-
-  const grouped: GroupedIssues = {};
-  let matched = 0;
-
-  for (const issue of issues) {
-    const components =
-      issue.fields.components?.map((c) => c.name.toLowerCase()) || [];
-    const labels = issue.fields.labels?.map((l) => l.toLowerCase()) || [];
-    const all = [...components, ...labels];
-
-    let placed = false;
-    for (const [role, keywords] of Object.entries(roleKeywords)) {
-      if (all.some((tag) => keywords.some((kw) => tag.includes(kw)))) {
-        if (!grouped[role]) grouped[role] = [];
-        grouped[role].push({
-          key: issue.key,
-          summary: issue.fields.summary,
-          assignee: issue.fields.assignee?.displayName || "Unassigned",
-          status: issue.fields.status.name,
-        });
-        placed = true;
-        matched++;
-        break;
-      }
-    }
-
-    if (!placed) {
-      if (!grouped["Other"]) grouped["Other"] = [];
-      grouped["Other"].push({
-        key: issue.key,
-        summary: issue.fields.summary,
-        assignee: issue.fields.assignee?.displayName || "Unassigned",
-        status: issue.fields.status.name,
-      });
-    }
-  }
-
-  if (issues.length > 0 && matched / issues.length < 0.3) return null;
-  return grouped;
 }
 
 /**
- * Build Slack-friendly plain text summary matching the format PMs use.
- * Uses Slack mrkdwn: *bold*, _italic_, :emoji:
+ * Build a "what got done" section for issues in the Done column.
+ */
+function buildDoneList(issues: JiraIssue[]): {
+  slack: string;
+  terminal: string;
+} | null {
+  const lastCol = COLUMNS[COLUMNS.length - 1];
+  const done = issues.filter(
+    (i) => mapStatus(i.fields.status.name) === lastCol
+  );
+
+  if (done.length === 0) return null;
+
+  const slackLines = done.map(
+    (i) => `\u2022 ${i.fields.summary} :white_check_mark:`
+  );
+  const terminalLines = done.map(
+    (i) => `  ${pc.cyan(i.key)} ${i.fields.summary} ${pc.green("\u2713")}`
+  );
+
+  return {
+    slack: slackLines.join("\n"),
+    terminal: terminalLines.join("\n"),
+  };
+}
+
+/**
+ * Build Slack-friendly summary matching the format PMs use.
  */
 function buildSlackSummary(
   sprintName: string,
@@ -103,18 +100,10 @@ function buildSlackSummary(
       : "Dates TBD";
   const project = config.jira.project;
 
-  const byAssignee = groupByAssignee(issues);
+  const priorities = buildPrioritiesList(issues);
+  const done = buildDoneList(issues);
 
-  const prioritiesSection = Object.entries(byAssignee)
-    .map(([name, items]) => {
-      const list = items
-        .map((i) => `\u2022 *${i.key}* ${i.summary} (${i.status})`)
-        .join("\n");
-      return `*${name}*\n${list}`;
-    })
-    .join("\n\n");
-
-  return `:clipboard: *${project} Sprint Roundup \u2014 ${sprintName}*
+  let text = `:clipboard: *${project} Sprint Roundup \u2014 ${sprintName}*
 Sprint: ${sprintName} | Dates: ${dates}
 
 :palm_tree: *PTO Radar*
@@ -127,10 +116,19 @@ _Add highlights, reminders, notes here_
 _Add milestones with dates here_
 
 :dart: *Sprint Priorities*
-${prioritiesSection}
-`;
+${priorities.slack}`;
+
+  if (done) {
+    text += `\n\n:white_check_mark: *Done*\n${done.slack}`;
+  }
+
+  return text + "\n";
 }
 
+/**
+ * Build concise Slack summary with role-based grouping if components/labels support it,
+ * otherwise flat list.
+ */
 function buildSlackConcise(
   sprintName: string,
   startDate: string | undefined,
@@ -138,30 +136,7 @@ function buildSlackConcise(
   issues: JiraIssue[]
 ): string {
   const project = config.jira.project;
-  const byComponent = groupByComponent(issues);
-
-  let prioritiesSection: string;
-
-  if (byComponent) {
-    prioritiesSection = Object.entries(byComponent)
-      .map(([role, items]) => {
-        const list = items
-          .map((i) => `\u2022 *${i.key}* ${i.summary} \u2014 _${i.assignee}_`)
-          .join("\n");
-        return `*${role}*\n${list}`;
-      })
-      .join("\n\n");
-  } else {
-    const byAssignee = groupByAssignee(issues);
-    prioritiesSection = Object.entries(byAssignee)
-      .map(([name, items]) => {
-        const list = items
-          .map((i) => `\u2022 *${i.key}* ${i.summary} (${i.status})`)
-          .join("\n");
-        return `*${name}*\n${list}`;
-      })
-      .join("\n\n");
-  }
+  const priorities = buildPrioritiesList(issues);
 
   return `:clipboard: *${project} Sprint Priorities \u2014 ${sprintName}*
 Sprint Focus: _Fill in sprint focus_
@@ -169,7 +144,8 @@ Sprint Focus: _Fill in sprint focus_
 *OOO*
 _Add OOO here_
 
-${prioritiesSection}
+:dart: *Priorities*
+${priorities.slack}
 
 *Notes*
 _Add notes here_
@@ -191,7 +167,8 @@ function renderTerminal(
       : "";
   const project = config.jira.project;
 
-  const byAssignee = groupByAssignee(issues);
+  const priorities = buildPrioritiesList(issues);
+  const done = buildDoneList(issues);
 
   const lines: string[] = [];
   lines.push(
@@ -209,14 +186,12 @@ function renderTerminal(
   lines.push(pc.dim("  Add milestones with dates here"));
   lines.push("");
   lines.push(pc.bold(":dart: Sprint Priorities"));
+  lines.push(priorities.terminal);
 
-  for (const [name, items] of Object.entries(byAssignee)) {
-    lines.push(`  ${pc.bold(name)}`);
-    for (const item of items) {
-      lines.push(
-        `    ${pc.cyan(item.key)} ${item.summary} ${pc.dim(`(${item.status})`)}`
-      );
-    }
+  if (done) {
+    lines.push("");
+    lines.push(pc.bold(pc.green("\u2713 Done")));
+    lines.push(done.terminal);
   }
 
   return lines.join("\n");
