@@ -48,7 +48,7 @@ jj list
 ### Install from source
 
 ```bash
-git clone https://github.com/jasperfurniss/jj-cli.git
+git clone https://github.com/jasperfurniss/jj.git
 cd jj-cli
 npm install
 npm run build
