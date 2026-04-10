@@ -22,7 +22,9 @@ jj list --pipe --jql "your jql here"
 
 Other useful commands:
 
-- `jj sprint --pipe` — Sprint overview grouped by status
+- `jj sprint --pipe` — Sprint overview (all team issues) grouped by status
+- `jj sprint --by-person --pipe` — Sprint overview grouped by person
+- `jj summary --pipe` — Slack-formatted sprint roundup for the whole team
 - `jj whois <name> --pipe` — Issues assigned to a person
 - `jj search <text> --pipe` — Search issues by summary
 

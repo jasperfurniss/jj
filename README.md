@@ -49,7 +49,7 @@ jj list
 
 ```bash
 git clone https://github.com/jasperfurniss/jj.git
-cd jj-cli
+cd jj
 npm install
 npm run build
 npm link
@@ -64,9 +64,10 @@ cp .env.example .env  # fill in your credentials
 | `jj <KEY>` | Fetch a specific issue (e.g., `jj WEB-1234`) |
 | `jj list` | List your assigned sprint issues |
 | `jj board` | Interactive kanban board — move cards between columns |
-| `jj sprint` | Sprint overview (issues by status + assignee) |
-| `jj summary` | Sprint roundup generator (opens $EDITOR with template) |
-| `jj summary --concise` | Concise format grouped by role |
+| `jj sprint` | Sprint overview — all team issues grouped by status |
+| `jj sprint --by-person` | Sprint overview grouped by person |
+| `jj summary` | Sprint roundup — auto-copies Slack-formatted summary to clipboard |
+| `jj summary --concise` | Shorter format for quick updates |
 | `jj ready <number>` | Transition an issue to Review (e.g., `jj ready 1234`) |
 | `jj open <KEY>` | Open issue in browser |
 | `jj comment <KEY>` | Post a comment (`-m "msg"` or opens $EDITOR) |
@@ -82,8 +83,8 @@ Most commands support `--pipe` for non-interactive, machine-readable output.
 
 JJ is built for developers *and* PMs. The sprint management commands are designed for the weekly rhythm of managing a Jira board:
 
-- **`jj sprint`** — Quick snapshot of where things stand. Paste into Slack or bring to standup.
-- **`jj summary`** — Generates a sprint roundup template pre-filled with Jira data. Add your PTO callouts, milestones, and commentary, then copy to Slack. Use `--concise` for a shorter role-based format.
+- **`jj summary`** — The big one. Generates a Slack-ready sprint roundup covering the entire team: Sprint Focus, PTO Radar, Agenda Highlights, Key Milestones, and Primary Focus Areas broken out by person. Automatically copies to your clipboard in Slack format — just paste into your squad channel and fill in the PTO days, milestones, and commentary. Use `--concise` for a shorter version.
+- **`jj sprint`** — Full sprint snapshot showing all team issues grouped by status. Use `--by-person` to see what each person is working on.
 - **`jj whois <name>`** — Check someone's plate before standup or 1:1s.
 - **`jj board`** — Full kanban board in your terminal. Drag cards between columns with keyboard or mouse.
 
