@@ -109,6 +109,13 @@ export async function searchIssues(
   );
 }
 
+export async function searchAllSprintIssues(
+  maxResults = 200
+): Promise<JiraSearchResult> {
+  const jql = `project = ${config.jira.project} AND sprint in openSprints() ORDER BY rank ASC`;
+  return searchIssues(jql, maxResults);
+}
+
 export async function getIssue(key: string): Promise<JiraIssue> {
   return jiraFetch<JiraIssue>(
     `/issue/${key}?fields=summary,status,priority,assignee,reporter,issuetype,parent,sprint,description,attachment,comment,labels,components`
