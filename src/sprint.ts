@@ -1,7 +1,7 @@
 import * as p from "@clack/prompts";
 import pc from "picocolors";
 import { config } from "./config.js";
-import { searchIssues, getActiveSprint } from "./jira-client.js";
+import { searchAllSprintIssues, getActiveSprint } from "./jira-client.js";
 import { mapStatus, COLUMNS } from "./board.js";
 
 interface SprintOverview {
@@ -14,7 +14,7 @@ interface SprintOverview {
 async function fetchSprintOverview(): Promise<SprintOverview> {
   const [sprint, result] = await Promise.all([
     getActiveSprint(config.jira.boardId),
-    searchIssues(),
+    searchAllSprintIssues(),
   ]);
 
   const sprintName = sprint?.name ?? "Current Sprint";
