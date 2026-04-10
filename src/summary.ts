@@ -6,9 +6,7 @@ import {
   getActiveSprint,
   type JiraIssue,
 } from "./jira-client.js";
-import { writeFileSync, readFileSync, mkdtempSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
+import { mapStatus, COLUMNS } from "./board.js";
 
 interface GroupedIssues {
   [group: string]: {
@@ -85,12 +83,15 @@ function groupByComponent(issues: JiraIssue[]): GroupedIssues | null {
     }
   }
 
-  // If fewer than 30% of issues matched a role, component grouping isn't useful
   if (issues.length > 0 && matched / issues.length < 0.3) return null;
   return grouped;
 }
 
-function buildDetailedTemplate(
+/**
+ * Build Slack-friendly plain text summary matching the format PMs use.
+ * Uses Slack mrkdwn: *bold*, _italic_, :emoji:
+ */
+function buildSlackSummary(
   sprintName: string,
   startDate: string | undefined,
   endDate: string | undefined,
@@ -107,30 +108,30 @@ function buildDetailedTemplate(
   const prioritiesSection = Object.entries(byAssignee)
     .map(([name, items]) => {
       const list = items
-        .map((i) => `- **${i.key}** ${i.summary} (${i.status})`)
+        .map((i) => `\u2022 *${i.key}* ${i.summary} (${i.status})`)
         .join("\n");
-      return `### ${name}\n${list}`;
+      return `*${name}*\n${list}`;
     })
     .join("\n\n");
 
-  return `# ${project} Sprint Roundup \u2014 ${sprintName}
+  return `:clipboard: *${project} Sprint Roundup \u2014 ${sprintName}*
 Sprint: ${sprintName} | Dates: ${dates}
 
-## PTO Radar
-<!-- Add PTO/OOO here -->
+:palm_tree: *PTO Radar*
+_Add PTO/OOO here_
 
-## Agenda Highlights
-<!-- Add highlights, reminders, notes here -->
+:spiral_calendar_pad: *Agenda Highlights*
+_Add highlights, reminders, notes here_
 
-## Key Milestones
-<!-- Add milestones with dates here -->
+:compass: *Key Milestones*
+_Add milestones with dates here_
 
-## Sprint Priorities
+:dart: *Sprint Priorities*
 ${prioritiesSection}
 `;
 }
 
-function buildConciseTemplate(
+function buildSlackConcise(
   sprintName: string,
   startDate: string | undefined,
   endDate: string | undefined,
@@ -145,9 +146,9 @@ function buildConciseTemplate(
     prioritiesSection = Object.entries(byComponent)
       .map(([role, items]) => {
         const list = items
-          .map((i) => `- **${i.key}** ${i.summary} \u2014 _${i.assignee}_`)
+          .map((i) => `\u2022 *${i.key}* ${i.summary} \u2014 _${i.assignee}_`)
           .join("\n");
-        return `## ${role}\n${list}`;
+        return `*${role}*\n${list}`;
       })
       .join("\n\n");
   } else {
@@ -155,109 +156,116 @@ function buildConciseTemplate(
     prioritiesSection = Object.entries(byAssignee)
       .map(([name, items]) => {
         const list = items
-          .map((i) => `- **${i.key}** ${i.summary} (${i.status})`)
+          .map((i) => `\u2022 *${i.key}* ${i.summary} (${i.status})`)
           .join("\n");
-        return `## ${name}\n${list}`;
+        return `*${name}*\n${list}`;
       })
       .join("\n\n");
   }
 
-  return `# ${project} Sprint Priorities \u2014 ${sprintName}
-Sprint Focus: <!-- Fill in sprint focus -->
+  return `:clipboard: *${project} Sprint Priorities \u2014 ${sprintName}*
+Sprint Focus: _Fill in sprint focus_
 
-## OOO
-<!-- Add OOO here -->
+*OOO*
+_Add OOO here_
 
 ${prioritiesSection}
 
-## Notes
-<!-- Add notes here -->
+*Notes*
+_Add notes here_
 `;
+}
+
+/**
+ * Rich terminal output with colors.
+ */
+function renderTerminal(
+  sprintName: string,
+  startDate: string | undefined,
+  endDate: string | undefined,
+  issues: JiraIssue[]
+): string {
+  const dates =
+    startDate && endDate
+      ? `${formatDate(startDate)} \u2013 ${formatDate(endDate)}`
+      : "";
+  const project = config.jira.project;
+
+  const byAssignee = groupByAssignee(issues);
+
+  const lines: string[] = [];
+  lines.push(
+    pc.bold(pc.cyan(`${project} Sprint Roundup \u2014 ${sprintName}`)) +
+      (dates ? pc.dim(` | ${dates}`) : "")
+  );
+  lines.push("");
+  lines.push(pc.bold(":palm_tree: PTO Radar"));
+  lines.push(pc.dim("  Add PTO/OOO here"));
+  lines.push("");
+  lines.push(pc.bold(":spiral_calendar_pad: Agenda Highlights"));
+  lines.push(pc.dim("  Add highlights, reminders, notes here"));
+  lines.push("");
+  lines.push(pc.bold(":compass: Key Milestones"));
+  lines.push(pc.dim("  Add milestones with dates here"));
+  lines.push("");
+  lines.push(pc.bold(":dart: Sprint Priorities"));
+
+  for (const [name, items] of Object.entries(byAssignee)) {
+    lines.push(`  ${pc.bold(name)}`);
+    for (const item of items) {
+      lines.push(
+        `    ${pc.cyan(item.key)} ${item.summary} ${pc.dim(`(${item.status})`)}`
+      );
+    }
+  }
+
+  return lines.join("\n");
 }
 
 export async function runSummary(opts: {
   pipe: boolean;
   concise: boolean;
 }): Promise<void> {
+  const s = opts.pipe ? null : p.spinner();
+  s?.start("Fetching sprint data...");
+
   const [sprint, result] = await Promise.all([
     getActiveSprint(config.jira.boardId),
     searchIssues(),
   ]);
 
   const sprintName = sprint?.name ?? "Current Sprint";
-  const template = opts.concise
-    ? buildConciseTemplate(
-        sprintName,
-        sprint?.startDate,
-        sprint?.endDate,
-        result.issues
-      )
-    : buildDetailedTemplate(
-        sprintName,
-        sprint?.startDate,
-        sprint?.endDate,
-        result.issues
-      );
 
-  // Pipe mode: output template directly, skip editor
+  // Build Slack-formatted text for clipboard
+  const slackText = opts.concise
+    ? buildSlackConcise(sprintName, sprint?.startDate, sprint?.endDate, result.issues)
+    : buildSlackSummary(sprintName, sprint?.startDate, sprint?.endDate, result.issues);
+
+  // Pipe mode: output slack text to stdout
   if (opts.pipe) {
-    process.stdout.write(template);
+    process.stdout.write(slackText);
     return;
   }
 
-  // Interactive mode: open in editor
-  const tmpDir = mkdtempSync(join(tmpdir(), "jj-summary-"));
-  const tmpFile = join(tmpDir, "SPRINT_SUMMARY.md");
-  writeFileSync(tmpFile, template);
+  s?.stop(`${sprintName}`);
 
-  const { execFileSync } = await import("child_process");
-  const editor = process.env.EDITOR || "nano";
-  execFileSync(editor, [tmpFile], { stdio: "inherit" });
+  // Show rich terminal output
+  console.log();
+  console.log(
+    renderTerminal(sprintName, sprint?.startDate, sprint?.endDate, result.issues)
+  );
+  console.log();
 
-  const final = readFileSync(tmpFile, "utf-8").trim();
-
-  if (!final) {
-    p.cancel("Empty summary, nothing generated.");
-    return;
-  }
-
-  const action = await p.select({
-    message: "What do you want to do with the summary?",
-    options: [
-      { value: "clipboard", label: "Copy to clipboard" },
-      { value: "stdout", label: "Print to stdout" },
-      { value: "file", label: "Save to file" },
-    ],
-  });
-
-  if (p.isCancel(action)) {
-    p.cancel("Cancelled.");
-    return;
-  }
-
-  switch (action) {
-    case "clipboard": {
-      const { execFileSync: exec } = await import("child_process");
-      try {
-        const cmd = process.platform === "darwin" ? "pbcopy" : "xclip";
-        const clipArgs =
-          process.platform === "darwin" ? [] : ["-selection", "clipboard"];
-        exec(cmd, clipArgs, { input: final });
-        p.log.success("Copied to clipboard!");
-      } catch {
-        p.log.warn("Clipboard not available. Printing instead:\n");
-        console.log(final);
-      }
-      break;
-    }
-    case "stdout":
-      console.log(final);
-      break;
-    case "file": {
-      const filename = `${sprintName.replace(/[^a-zA-Z0-9-]/g, "-").toLowerCase()}-summary.md`;
-      writeFileSync(filename, final, "utf-8");
-      p.log.success(`Saved to ${pc.green(filename)}`);
-      break;
-    }
+  // Auto-copy to clipboard
+  try {
+    const { execFileSync } = await import("child_process");
+    const cmd = process.platform === "darwin" ? "pbcopy" : "xclip";
+    const clipArgs =
+      process.platform === "darwin" ? [] : ["-selection", "clipboard"];
+    execFileSync(cmd, clipArgs, { input: slackText });
+    p.log.success("Copied to clipboard (Slack format) \u2014 paste it anywhere!");
+  } catch {
+    p.log.warn("Clipboard not available. Here's the Slack-formatted text:\n");
+    console.log(slackText);
   }
 }

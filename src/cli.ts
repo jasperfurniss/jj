@@ -506,7 +506,7 @@ async function main() {
       "  │ jj board                     │ Interactive kanban board (move cards between columns)  │",
       "  │ jj sprint                    │ Sprint overview (issues by status + assignee)          │",
       "  │ jj sprint --pipe             │ Sprint overview as markdown                            │",
-      "  │ jj summary                   │ Sprint roundup generator (opens $EDITOR)               │",
+      "  │ jj summary                   │ Sprint roundup (auto-copies Slack format to clipboard)  │",
       "  │ jj summary --concise         │ Concise format (grouped by role)                       │",
       "  │ jj ready <number>            │ Transition issue to Review (e.g. jj ready 1234)       │",
       "  │ jj open [KEY]                │ Open issue in browser                                  │",
