@@ -819,7 +819,9 @@ async function main() {
     const isPipe = args.includes("--pipe");
     if (!isPipe) printBanner();
 
-    const sourceKey = args[1] && !args[1].startsWith("-") ? args[1].toUpperCase() : undefined;
+    const sourceKey = args[1] && !args[1].startsWith("-")
+      ? normalizeIssueKey(args[1], config.jira.project) ?? undefined
+      : undefined;
     if (!sourceKey) {
       console.error("Usage: jj clone <ISSUE-KEY> [--summary \"New title\"] [--pipe]");
       process.exit(1);
@@ -987,7 +989,9 @@ async function main() {
   if (args[0] === "open") {
     printBanner();
     validateConfig();
-    let keyOrUndef: string | undefined = args[1]?.toUpperCase();
+    let keyOrUndef: string | undefined = args[1]
+      ? normalizeIssueKey(args[1], config.jira.project) ?? undefined
+      : undefined;
     if (!keyOrUndef) {
       requireTerminal("Pass a key: `jj open WEB-1234`.");
       keyOrUndef = (await listAndSelect()) ?? undefined;
@@ -1131,7 +1135,7 @@ async function main() {
 
   // Direct key: `jira-md WEB-9054`
   if (args[0] && !args[0].startsWith("-") && args[0] !== "list") {
-    issueKey = args[0].toUpperCase();
+    issueKey = normalizeIssueKey(args[0], config.jira.project) ?? args[0].toUpperCase();
   }
 
   // List mode: `jj list [--all]` or `jj` with no args
