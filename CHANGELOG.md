@@ -4,6 +4,10 @@ All notable changes to JJ are documented here. The format follows [Keep a Change
 
 ## [Unreleased]
 
+### Added
+
+- CI runs the typecheck, tests, and build on every push and pull request.
+
 ## [1.2.0] - 2026-11-12
 
 JJ can now change issues, not just read them: move, assign, edit, link, and comment in Markdown, all scriptable for agents.
