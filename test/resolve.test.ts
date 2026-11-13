@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeIssueKey, findTransitions, findUsers } from "../src/resolve.js";
+import { normalizeIssueKey, findTransitions, findUsers, findLinkRelations } from "../src/resolve.js";
 
 describe("normalizeIssueKey", () => {
   it("prefixes a bare number with the project key", () => {
@@ -84,5 +84,40 @@ describe("findUsers", () => {
 
   it("returns every partial match when the query is ambiguous", () => {
     expect(findUsers(USERS, "na").map((u) => u.accountId)).toEqual(["a1", "a2"]);
+  });
+});
+
+const LINK_TYPES = [
+  { id: "1", name: "Blocks", inward: "is blocked by", outward: "blocks" },
+  { id: "2", name: "Relates", inward: "relates to", outward: "relates to" },
+  { id: "3", name: "Duplicate", inward: "is duplicated by", outward: "duplicates" },
+];
+
+describe("findLinkRelations", () => {
+  const describeAll = (relation: string) =>
+    findLinkRelations(LINK_TYPES, relation).map((r) => `${r.type.name}:${r.direction}`);
+
+  it("matches an outward description", () => {
+    expect(describeAll("blocks")).toEqual(["Blocks:outward"]);
+  });
+
+  it("matches an inward description", () => {
+    expect(describeAll("is blocked by")).toEqual(["Blocks:inward"]);
+  });
+
+  it("matches a link type name as outward", () => {
+    expect(describeAll("duplicate")).toEqual(["Duplicate:outward"]);
+  });
+
+  it("counts a symmetric type once", () => {
+    expect(describeAll("relates to")).toEqual(["Relates:outward"]);
+  });
+
+  it("falls back to a partial match", () => {
+    expect(describeAll("blocked")).toEqual(["Blocks:inward"]);
+  });
+
+  it("returns nothing when no type matches", () => {
+    expect(describeAll("depends on")).toEqual([]);
   });
 });

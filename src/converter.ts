@@ -1,10 +1,15 @@
-import type { JiraIssue, JiraAttachment, JiraComment } from "./jira-client.js";
+import type {
+  JiraIssue,
+  JiraAttachment,
+  JiraComment,
+  JiraIssueLink,
+} from "./jira-client.js";
 
 /**
  * Convert Atlassian Document Format (ADF) to Markdown.
  * Jira Cloud API v3 returns descriptions in ADF JSON.
  */
-function adfToMarkdown(node: any, depth = 0, listIndex?: number): string {
+export function adfToMarkdown(node: any, depth = 0, listIndex?: number): string {
   if (!node) return "";
   if (typeof node === "string") return node;
 
@@ -72,11 +77,14 @@ function adfToMarkdown(node: any, depth = 0, listIndex?: number): string {
     }
     case "codeBlock": {
       const lang = node.attrs?.language || "";
-      return `\`\`\`${lang}\n${children}\`\`\`\n\n`;
+      // Jira stores code without a trailing newline; the closing fence needs its own line.
+      const code = children.endsWith("\n") ? children : `${children}\n`;
+      return `\`\`\`${lang}\n${code}\`\`\`\n\n`;
     }
     case "blockquote":
       return (
         children
+          .trimEnd()
           .split("\n")
           .map((line: string) => `> ${line}`)
           .join("\n") + "\n\n"
@@ -149,6 +157,31 @@ function formatComment(comment: JiraComment): string {
   const date = new Date(comment.created).toLocaleDateString();
   const body = adfToMarkdown(comment.body).trim();
   return `**${comment.author.displayName}** (${date}):\n${body}`;
+}
+
+export interface IssueLinkSummary {
+  id: string;
+  /** Reads from this issue's side, for example "blocks" or "is blocked by" */
+  relation: string;
+  key: string;
+  summary: string;
+  status: string;
+}
+
+export function describeLinks(links: JiraIssueLink[] = []): IssueLinkSummary[] {
+  return links.flatMap((link) => {
+    const other = link.outwardIssue ?? link.inwardIssue;
+    if (!other) return [];
+    return [
+      {
+        id: link.id,
+        relation: link.outwardIssue ? link.type.outward : link.type.inward,
+        key: other.key,
+        summary: other.fields.summary,
+        status: other.fields.status?.name ?? "",
+      },
+    ];
+  });
 }
 
 export interface ConvertOptions {
@@ -225,6 +258,25 @@ export function issueToMarkdown(
     lines.push(desc);
   }
 
+  // Links and subtasks
+  const links = describeLinks(f.issuelinks);
+  if (links.length) {
+    lines.push("## Links\n");
+    for (const link of links) {
+      lines.push(`- ${link.relation} ${link.key}: ${link.summary} (${link.status})`);
+    }
+    lines.push("");
+  }
+
+  const subtasks = f.subtasks || [];
+  if (subtasks.length) {
+    lines.push("## Subtasks\n");
+    for (const task of subtasks) {
+      lines.push(`- ${task.key}: ${task.fields.summary} (${task.fields.status?.name ?? ""})`);
+    }
+    lines.push("");
+  }
+
   // Attachments list
   const attachments = f.attachment || [];
   if (attachments.length) {
@@ -259,4 +311,39 @@ export function issueToMarkdown(
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+/**
+ * A plain JSON view of an issue for scripts and agents. Rich text
+ * (description and comments) comes back as Markdown.
+ */
+export function issueToJson(issue: JiraIssue, baseUrl?: string) {
+  const f = issue.fields;
+
+  return {
+    key: issue.key,
+    url: baseUrl ? `${baseUrl}/browse/${issue.key}` : null,
+    summary: f.summary,
+    type: f.issuetype?.name ?? null,
+    status: f.status?.name ?? null,
+    priority: f.priority?.name ?? null,
+    assignee: f.assignee?.displayName ?? null,
+    reporter: f.reporter?.displayName ?? null,
+    parent: f.parent ? { key: f.parent.key, summary: f.parent.fields.summary } : null,
+    labels: f.labels ?? [],
+    components: (f.components ?? []).map((c) => c.name),
+    created: f.created ?? null,
+    updated: f.updated ?? null,
+    description: f.description ? adfToMarkdown(f.description).trim() : "",
+    links: describeLinks(f.issuelinks),
+    subtasks: (f.subtasks ?? []).map((task) => ({
+      key: task.key,
+      summary: task.fields.summary,
+      status: task.fields.status?.name ?? "",
+    })),
+    comments: (f.comment?.comments ?? []).map((c) => ({
+      author: c.author.displayName,
+      created: c.created,
+      body: adfToMarkdown(c.body).trim(),
+    })),
+  };
 }

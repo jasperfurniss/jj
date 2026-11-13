@@ -16,9 +16,18 @@ import {
   getMyself,
   findAssignableUsers,
   assignIssue,
+  updateIssue,
+  getIssueLinkTypes,
+  linkIssues,
+  deleteIssueLink,
 } from "./jira-client.js";
-import { normalizeIssueKey, findTransitions, findUsers } from "./resolve.js";
-import { issueToMarkdown } from "./converter.js";
+import {
+  normalizeIssueKey,
+  findTransitions,
+  findUsers,
+  findLinkRelations,
+} from "./resolve.js";
+import { issueToMarkdown, issueToJson, describeLinks } from "./converter.js";
 import { runSprint } from "./sprint.js";
 import { runSummary } from "./summary.js";
 import { startBoard } from "./board-ui.js";
@@ -27,6 +36,7 @@ import { resolve, join } from "path";
 import { tmpdir } from "os";
 
 function printBanner() {
+  if (!process.stdout.isTTY) return;
   const cwd = process.cwd().replace(process.env.HOME || "", "~");
   const b = (s: string) => pc.blue(s);
   console.log(b("     ██╗      ██╗"));
@@ -36,6 +46,39 @@ function printBanner() {
   console.log(b("╚█████╔╝ ╚█████╔╝"));
   console.log(b(" ╚════╝   ╚════╝"));
   console.log();
+}
+
+const MY_OPEN_ISSUES_JQL =
+  "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC";
+
+function packageVersion(): string {
+  const pkg = JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf-8")
+  );
+  return pkg.version;
+}
+
+/** Interactive prompts crash without a terminal, so fail with a hint instead. */
+function requireTerminal(hint: string) {
+  if (process.stdin.isTTY && process.stdout.isTTY) return;
+  console.error(`This needs an interactive terminal. ${hint}`);
+  process.exit(1);
+}
+
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf-8").trim();
+}
+
+/** Every value that follows a repeatable flag, for example each --add-label. */
+function flagValues(args: string[], flag: string): string[] {
+  return args.flatMap((arg, i) => (arg === flag && args[i + 1] ? [args[i + 1]] : []));
+}
+
+function flagValue(args: string[], flag: string): string | undefined {
+  const idx = args.indexOf(flag);
+  return idx !== -1 ? args[idx + 1] : undefined;
 }
 
 async function listAndSelect(jql?: string) {
@@ -107,18 +150,29 @@ async function fetchAndConvert(issueKey: string) {
   }
 }
 
-async function pipeMode(issueKey: string) {
+async function pipeMode(issueKey: string, json = false) {
   validateConfig();
 
   const issue = await getIssue(issueKey.toUpperCase());
-  const md = issueToMarkdown(issue);
-  process.stdout.write(md);
+
+  if (json) {
+    console.log(JSON.stringify(issueToJson(issue, config.jira.baseUrl), null, 2));
+    return;
+  }
+
+  process.stdout.write(issueToMarkdown(issue));
 }
 
-async function listMode(jql?: string) {
+async function listMode(jql?: string, json = false) {
   validateConfig();
 
   const result = await searchIssues(jql);
+
+  if (json) {
+    const issues = result.issues.map((issue) => issueToJson(issue, config.jira.baseUrl));
+    console.log(JSON.stringify(issues, null, 2));
+    return;
+  }
 
   if (!result.issues.length) {
     console.error("No issues found.");
@@ -133,10 +187,9 @@ async function listMode(jql?: string) {
   }
 }
 
-async function readyMode(ticketNumber: string) {
+async function readyMode(issueKey: string) {
   validateConfig();
 
-  const issueKey = `${config.jira.project}-${ticketNumber}`.toUpperCase();
   const targetName = config.readyTransition;
   const s = p.spinner();
   s.start(`Moving ${issueKey} to ${targetName}...`);
@@ -247,6 +300,131 @@ async function assignMode(issueKey: string, who: string) {
   }
 }
 
+async function editMode(issueKey: string, args: string[]) {
+  validateConfig();
+
+  const summary = flagValue(args, "--summary");
+  let description = flagValue(args, "--description");
+  if (description === "-") description = await readStdin();
+
+  const addLabels = flagValues(args, "--add-label");
+  const removeLabels = flagValues(args, "--remove-label");
+
+  if (summary === undefined && description === undefined && !addLabels.length && !removeLabels.length) {
+    console.error(
+      'Nothing to change. Use --summary "...", --description "..." (Markdown, or - for stdin), --add-label, or --remove-label.'
+    );
+    process.exit(1);
+  }
+
+  const s = p.spinner();
+  s.start(`Updating ${issueKey}...`);
+
+  try {
+    await updateIssue(issueKey, { summary, description, addLabels, removeLabels });
+    const changed = [
+      summary !== undefined && "summary",
+      description !== undefined && "description",
+      (addLabels.length || removeLabels.length) && "labels",
+    ].filter(Boolean);
+    s.stop(`${issueKey} updated`);
+    p.log.success(pc.green(`Updated ${changed.join(", ")} on ${issueKey}`));
+  } catch (e: any) {
+    s.stop("Failed");
+    p.log.error(e.message);
+    process.exit(1);
+  }
+}
+
+async function linkMode(fromKey: string, relation: string, toKey: string) {
+  validateConfig();
+
+  const s = p.spinner();
+  s.start(`Linking ${fromKey} ${relation} ${toKey}...`);
+
+  try {
+    const types = await getIssueLinkTypes();
+    const matches = findLinkRelations(types, relation);
+
+    if (matches.length !== 1) {
+      const options = (matches.length ? matches.map((m) => m.type) : types)
+        .flatMap((t) => (t.inward === t.outward ? [t.outward] : [t.outward, t.inward]))
+        .join(", ");
+      s.stop("Failed");
+      p.log.error(
+        matches.length
+          ? `"${relation}" matches more than one link type: ${options}`
+          : `No link type matches "${relation}".\nAvailable: ${options}`
+      );
+      process.exit(1);
+    }
+
+    const [{ type, direction }] = matches;
+    const phrase = direction === "outward" ? type.outward : type.inward;
+
+    if (direction === "outward") {
+      await linkIssues(type.name, fromKey, toKey);
+    } else {
+      await linkIssues(type.name, toKey, fromKey);
+    }
+    s.stop("Linked");
+    p.log.success(pc.green(`${fromKey} ${phrase} ${toKey}`));
+  } catch (e: any) {
+    s.stop("Failed");
+    p.log.error(e.message);
+    process.exit(1);
+  }
+}
+
+async function unlinkMode(fromKey: string, toKey: string) {
+  validateConfig();
+
+  const s = p.spinner();
+  s.start(`Removing links between ${fromKey} and ${toKey}...`);
+
+  try {
+    const issue = await getIssue(fromKey);
+    const links = describeLinks(issue.fields.issuelinks).filter((l) => l.key === toKey);
+
+    if (!links.length) {
+      s.stop("Nothing to remove");
+      p.log.warn(`${fromKey} has no links to ${toKey}.`);
+      return;
+    }
+
+    await Promise.all(links.map((link) => deleteIssueLink(link.id)));
+    s.stop("Unlinked");
+    p.log.success(
+      pc.green(links.map((l) => `Removed: ${fromKey} ${l.relation} ${toKey}`).join("\n"))
+    );
+  } catch (e: any) {
+    s.stop("Failed");
+    p.log.error(e.message);
+    process.exit(1);
+  }
+}
+
+async function transitionsMode(issueKey: string, json: boolean) {
+  validateConfig();
+
+  const transitions = await getTransitions(issueKey);
+
+  if (json) {
+    console.log(
+      JSON.stringify(
+        transitions.map((t) => ({ id: t.id, name: t.name, to: t.to?.name ?? null })),
+        null,
+        2
+      )
+    );
+    return;
+  }
+
+  for (const t of transitions) {
+    console.log(t.to?.name && t.to.name !== t.name ? `${t.name} → ${t.to.name}` : t.name);
+  }
+}
+
 async function boardMode() {
   validateConfig();
 
@@ -281,6 +459,8 @@ async function commentMode(issueKey: string, inlineMessage?: string) {
 
   if (inlineMessage) {
     body = inlineMessage.trim();
+  } else if (!process.stdin.isTTY) {
+    body = await readStdin();
   } else {
     const { execFileSync } = await import("child_process");
 
@@ -327,12 +507,8 @@ async function createMode(opts: CreateOptions = {}) {
   if (opts.message) {
     body = opts.message.trim();
   } else {
-    // Check for piped stdin
-    const isTTY = process.stdin.isTTY;
-    if (!isTTY) {
-      const chunks: Buffer[] = [];
-      for await (const chunk of process.stdin) chunks.push(chunk);
-      body = Buffer.concat(chunks).toString("utf-8").trim();
+    if (!process.stdin.isTTY) {
+      body = await readStdin();
     } else {
       const { execFileSync } = await import("child_process");
 
@@ -572,39 +748,69 @@ async function cloneMode(opts: CloneOptions) {
   }
 }
 
+const HELP_ROWS: [string, string][] = [
+  ["jj", "Interactive list → select → view as markdown"],
+  ["jj <KEY>", "Fetch a specific issue (e.g. jj WEB-1234)"],
+  ["jj <KEY> --pipe", "Output issue markdown to stdout"],
+  ["jj <KEY> --json", "Output the issue as JSON (rich text as markdown)"],
+  ["jj list", "List assigned sprint issues"],
+  ["jj list --all", "All your open issues, not just this sprint"],
+  ["jj list --pipe | --json", "Tab-separated or JSON list (also with --jql)"],
+  ["jj board", "Interactive kanban board (move cards between columns)"],
+  ["jj sprint", "Sprint overview (issues by status + assignee)"],
+  ["jj sprint --by-person", "Sprint overview grouped by person"],
+  ["jj summary", "Sprint roundup (auto-copies Slack format to clipboard)"],
+  ["jj summary --concise", "Concise format (grouped by role)"],
+  ["jj ready <KEY>", "Move issue to Review (e.g. jj ready 1234)"],
+  ["jj move <KEY> <status>", "Move issue to any status (e.g. jj move 1234 done)"],
+  ["jj transitions <KEY>", "List the statuses an issue can move to"],
+  ["jj assign <KEY> [who]", "Assign to me (default), a name, or none"],
+  ["jj edit <KEY> [flags]", "Edit --summary, --description, --add/remove-label"],
+  ["jj link <KEY> <rel> <KEY>", "Link issues (e.g. jj link 1 blocks 2)"],
+  ["jj unlink <KEY> <KEY>", "Remove the links between two issues"],
+  ["jj comment [KEY]", "Comment in markdown (-m, stdin, or $EDITOR)"],
+  ["jj open [KEY]", "Open issue in browser"],
+  ["jj create", "Create issue (-m, $EDITOR, or pipe from stdin)"],
+  ["jj clone <KEY>", "Clone an issue (keeps type, parent, labels)"],
+  ["jj whois <name>", "What's assigned to this person?"],
+  ["jj search <text>", "Search issues by summary"],
+  ["jj --version", "Print the installed version"],
+];
+
+function printHelp() {
+  const left = Math.max(...HELP_ROWS.map(([cmd]) => cmd.length)) + 2;
+  const right = Math.max(...HELP_ROWS.map(([, usage]) => usage.length)) + 2;
+  const bar = (l: string, m: string, r: string) =>
+    `  ${l}${"─".repeat(left)}${m}${"─".repeat(right)}${r}`;
+  const row = (cmd: string, usage: string) =>
+    `  │ ${cmd.padEnd(left - 1)}│ ${usage.padEnd(right - 1)}│`;
+
+  console.log(
+    [
+      bar("┌", "┬", "┐"),
+      row("Command", "Usage"),
+      bar("├", "┼", "┤"),
+      ...HELP_ROWS.map(([cmd, usage]) => row(cmd, usage)),
+      bar("└", "┴", "┘"),
+    ].join("\n")
+  );
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const pipeFlag = args.includes("--pipe") || args.includes("-p");
+  const jsonFlag = args.includes("--json");
 
-  // help mode: `jj help`
-  if (args[0] === "help") {
+  // version: `jj --version`
+  if (args[0] === "--version" || args[0] === "-v" || args[0] === "version") {
+    console.log(packageVersion());
+    return;
+  }
+
+  // help mode: `jj help` or `jj --help`
+  if (args[0] === "help" || args.includes("--help") || args.includes("-h")) {
     printBanner();
-    console.log([
-      "  ┌──────────────────────────────┬───────────────────────────────────────────────────────┐",
-      "  │           Command            │                         Usage                         │",
-      "  ├──────────────────────────────┼───────────────────────────────────────────────────────┤",
-      "  │ jj                           │ Interactive list → select → view as markdown          │",
-      "  │ jj <KEY>                     │ Fetch a specific issue (e.g. jj WEB-1234)             │",
-      "  │ jj <KEY> --pipe              │ Output issue markdown to stdout                       │",
-      "  │ jj list                      │ List assigned sprint issues                           │",
-      "  │ jj list --pipe               │ List issues (non-interactive, tab-separated)           │",
-      "  │ jj board                     │ Interactive kanban board (move cards between columns)  │",
-      "  │ jj sprint                    │ Sprint overview (issues by status + assignee)          │",
-      "  │ jj sprint --by-person        │ Sprint overview grouped by person                      │",
-      "  │ jj sprint --pipe             │ Sprint overview as markdown                            │",
-      "  │ jj summary                   │ Sprint roundup (auto-copies Slack format to clipboard)  │",
-      "  │ jj summary --concise         │ Concise format (grouped by role)                       │",
-      "  │ jj ready <number>            │ Transition issue to Review (e.g. jj ready 1234)       │",
-      "  │ jj move <KEY> <status>       │ Move issue to any status (e.g. jj move 1234 done)     │",
-      "  │ jj assign <KEY> [who]        │ Assign to me (default), a name, or none               │",
-      "  │ jj open [KEY]                │ Open issue in browser                                  │",
-      "  │ jj comment [KEY]             │ Post a comment (-m \"msg\" or opens $EDITOR)             │",
-      "  │ jj create                    │ Create issue (-m, $EDITOR, or pipe from stdin)         │",
-      "  │ jj clone <KEY>               │ Clone an issue (keeps type, parent, labels)            │",
-      "  │ jj whois <name>              │ What's assigned to this person?                        │",
-      "  │ jj search <text>             │ Search issues by summary                               │",
-      "  └──────────────────────────────┴───────────────────────────────────────────────────────┘",
-    ].join("\n"));
+    printHelp();
     return;
   }
 
@@ -770,6 +976,7 @@ async function main() {
 
   // board mode: `jj board`
   if (args[0] === "board") {
+    requireTerminal("Try `jj sprint --pipe` instead.");
     printBanner();
     await boardMode();
     return;
@@ -782,6 +989,7 @@ async function main() {
     validateConfig();
     let keyOrUndef: string | undefined = args[1]?.toUpperCase();
     if (!keyOrUndef) {
+      requireTerminal("Pass a key: `jj open WEB-1234`.");
       keyOrUndef = (await listAndSelect()) ?? undefined;
       if (!keyOrUndef) return;
     }
@@ -795,8 +1003,11 @@ async function main() {
     printBanner();
     validateConfig();
 
-    let key = args[1] && !args[1].startsWith("-") ? args[1].toUpperCase() : undefined;
+    let key = args[1] && !args[1].startsWith("-")
+      ? normalizeIssueKey(args[1], config.jira.project) ?? undefined
+      : undefined;
     if (!key) {
+      requireTerminal('Pass a key: `jj comment WEB-1234 -m "..."`.');
       key = (await listAndSelect()) ?? undefined;
       if (!key) return;
     }
@@ -832,32 +1043,83 @@ async function main() {
     return;
   }
 
-  // ready mode: `jj ready 1823`
+  // ready mode: `jj ready 1823` or `jj ready WEB-1823`
   if (args[0] === "ready") {
-    const ticketNumber = args[1];
-    if (!ticketNumber || !/^\d+$/.test(ticketNumber)) {
-      console.error("Usage: jj ready <ticket-number>  e.g. jj ready 1823");
+    const issueKey = args[1] ? normalizeIssueKey(args[1], config.jira.project) : null;
+    if (!issueKey) {
+      console.error("Usage: jj ready <KEY|number>  e.g. jj ready 1823");
       process.exit(1);
     }
-    await readyMode(ticketNumber);
+    await readyMode(issueKey);
+    return;
+  }
+
+  // transitions mode: `jj transitions WEB-1823 [--json]`
+  if (args[0] === "transitions") {
+    const issueKey = args[1] ? normalizeIssueKey(args[1], config.jira.project) : null;
+    if (!issueKey) {
+      console.error("Usage: jj transitions <KEY|number>  e.g. jj transitions 1823");
+      process.exit(1);
+    }
+    await transitionsMode(issueKey, jsonFlag);
+    return;
+  }
+
+  // edit mode: `jj edit WEB-1823 --summary "..." --description - --add-label x`
+  if (args[0] === "edit") {
+    const issueKey = args[1] ? normalizeIssueKey(args[1], config.jira.project) : null;
+    if (!issueKey) {
+      console.error(
+        'Usage: jj edit <KEY|number> [--summary "..."] [--description "..." | -] [--add-label x] [--remove-label y]'
+      );
+      process.exit(1);
+    }
+    await editMode(issueKey, args.slice(2));
+    return;
+  }
+
+  // unlink mode: `jj unlink WEB-1 WEB-2` removes every link between them
+  if (args[0] === "unlink") {
+    const words = args.slice(1).filter((a) => !a.startsWith("-"));
+    const fromKey = words[0] ? normalizeIssueKey(words[0], config.jira.project) : null;
+    const toKey = words[1] ? normalizeIssueKey(words[1], config.jira.project) : null;
+    if (!fromKey || !toKey) {
+      console.error("Usage: jj unlink <KEY> <KEY>  e.g. jj unlink 1823 1824");
+      process.exit(1);
+    }
+    await unlinkMode(fromKey, toKey);
+    return;
+  }
+
+  // link mode: `jj link WEB-1 blocks WEB-2` or `jj link 1 is blocked by 2`
+  if (args[0] === "link") {
+    const words = args.slice(1).filter((a) => !a.startsWith("-"));
+    const fromKey = words.length >= 3 ? normalizeIssueKey(words[0], config.jira.project) : null;
+    const toKey = words.length >= 3 ? normalizeIssueKey(words[words.length - 1], config.jira.project) : null;
+    const relation = words.slice(1, -1).join(" ");
+    if (!fromKey || !toKey || !relation) {
+      console.error("Usage: jj link <KEY> <relation> <KEY>  e.g. jj link 1823 blocks 1824");
+      process.exit(1);
+    }
+    await linkMode(fromKey, relation, toKey);
     return;
   }
 
   // Pipe mode: non-interactive, just output markdown to stdout
   // Usage: jira-md WEB-1234 --pipe > .jira/WEB-1234.md
-  if (pipeFlag) {
-    const key = args.find((a) => !a.startsWith("-") && a !== "list");
+  const listJql =
+    flagValue(args, "--jql") ?? (args.includes("--all") ? MY_OPEN_ISSUES_JQL : undefined);
 
-    // jira-md list --pipe  → list assigned stories (non-interactive)
+  if (pipeFlag || jsonFlag) {
+    const key = args.find((a, i) => !a.startsWith("-") && a !== "list" && args[i - 1] !== "--jql");
+
+    // jj list --pipe | --json  → list issues (non-interactive)
     if (args.includes("list") || !key) {
-      const customJql = args.includes("--jql")
-        ? args[args.indexOf("--jql") + 1]
-        : undefined;
-      await listMode(customJql);
+      await listMode(listJql, jsonFlag);
       return;
     }
 
-    await pipeMode(key);
+    await pipeMode(normalizeIssueKey(key, config.jira.project) ?? key, jsonFlag);
     return;
   }
 
@@ -872,13 +1134,10 @@ async function main() {
     issueKey = args[0].toUpperCase();
   }
 
-  // List mode: `jira-md list` or `jira-md` with no args
+  // List mode: `jj list [--all]` or `jj` with no args
   if (!issueKey) {
-    const customJql = args.includes("--jql")
-      ? args[args.indexOf("--jql") + 1]
-      : undefined;
-
-    issueKey = await listAndSelect(customJql);
+    requireTerminal("Use `jj list --pipe`, or pass a key: `jj WEB-1234`.");
+    issueKey = await listAndSelect(listJql);
     if (!issueKey) return;
   }
 

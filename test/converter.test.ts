@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { issueToMarkdown } from "../src/converter.js";
+import { issueToMarkdown, issueToJson, describeLinks } from "../src/converter.js";
 import type { JiraIssue } from "../src/jira-client.js";
 
 function makeIssue(overrides: Partial<JiraIssue["fields"]> = {}): JiraIssue {
@@ -111,7 +111,7 @@ describe("issueToMarkdown", () => {
         },
       })
     );
-    expect(md).toContain("```ts\nconst x = 1;```");
+    expect(md).toContain("```ts\nconst x = 1;\n```");
   });
 
   it("renders ADF bullet list", () => {
@@ -246,5 +246,61 @@ describe("issueToMarkdown", () => {
   it("handles null description gracefully", () => {
     const md = issueToMarkdown(makeIssue({ description: null }));
     expect(md).not.toContain("## Description");
+  });
+});
+
+const BLOCKS = { id: "1", name: "Blocks", inward: "is blocked by", outward: "blocks" };
+const linked = (key: string, summary: string, status: string) => ({
+  key,
+  fields: { summary, status: { name: status } },
+});
+
+describe("describeLinks", () => {
+  it("reads each link from this issue's side", () => {
+    expect(
+      describeLinks([
+        { id: "10", type: BLOCKS, outwardIssue: linked("WEB-2", "Later", "Backlog") },
+        { id: "11", type: BLOCKS, inwardIssue: linked("WEB-3", "Earlier", "Done") },
+      ])
+    ).toEqual([
+      { id: "10", relation: "blocks", key: "WEB-2", summary: "Later", status: "Backlog" },
+      { id: "11", relation: "is blocked by", key: "WEB-3", summary: "Earlier", status: "Done" },
+    ]);
+  });
+});
+
+describe("issueToMarkdown links and subtasks", () => {
+  it("lists links and subtasks", () => {
+    const md = issueToMarkdown(
+      makeIssue({
+        issuelinks: [{ id: "10", type: BLOCKS, outwardIssue: linked("WEB-2", "Later", "Backlog") }],
+        subtasks: [linked("WEB-4", "Sub", "To Do")],
+      })
+    );
+    expect(md).toContain("## Links\n\n- blocks WEB-2: Later (Backlog)");
+    expect(md).toContain("## Subtasks\n\n- WEB-4: Sub (To Do)");
+  });
+});
+
+describe("issueToJson", () => {
+  it("returns plain fields with Markdown rich text", () => {
+    const json = issueToJson(
+      makeIssue({
+        description: {
+          type: "doc",
+          version: 1,
+          content: [{ type: "paragraph", content: [{ type: "text", text: "Hello" }] }],
+        },
+        issuelinks: [{ id: "11", type: BLOCKS, inwardIssue: linked("WEB-3", "Earlier", "Done") }],
+      }),
+      "https://jira.test"
+    );
+
+    expect(json).toMatchObject({
+      url: `https://jira.test/browse/${json.key}`,
+      description: "Hello",
+      links: [{ id: "11", relation: "is blocked by", key: "WEB-3", summary: "Earlier", status: "Done" }],
+      subtasks: [],
+    });
   });
 });

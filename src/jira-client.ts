@@ -1,4 +1,5 @@
 import { config } from "./config.js";
+import { markdownToAdf } from "./markdown-adf.js";
 import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { join, resolve } from "path";
 
@@ -16,6 +17,10 @@ interface JiraField {
   comment?: { comments: JiraComment[] };
   labels?: string[];
   components?: { name: string }[];
+  issuelinks?: JiraIssueLink[];
+  subtasks?: JiraLinkedIssue[];
+  created?: string;
+  updated?: string;
   [key: string]: any;
 }
 
@@ -52,6 +57,27 @@ export interface JiraTransition {
   name: string;
   /** The status this transition moves the issue to */
   to?: { name: string };
+}
+
+export interface JiraIssueLinkType {
+  id: string;
+  name: string;
+  /** For example "is blocked by" */
+  inward: string;
+  /** For example "blocks" */
+  outward: string;
+}
+
+export interface JiraIssueLink {
+  id: string;
+  type: JiraIssueLinkType;
+  inwardIssue?: JiraLinkedIssue;
+  outwardIssue?: JiraLinkedIssue;
+}
+
+export interface JiraLinkedIssue {
+  key: string;
+  fields: { summary: string; status: { name: string } };
 }
 
 export interface JiraUser {
@@ -114,7 +140,7 @@ export async function searchIssues(
 ): Promise<JiraSearchResult> {
   const query = jql || config.jira.defaultJql;
   return jiraFetch<JiraSearchResult>(
-    `/search/jql?jql=${encodeURIComponent(query)}&maxResults=${maxResults}&fields=summary,status,priority,assignee,reporter,issuetype,parent,sprint,description,attachment,comment,labels,components`
+    `/search/jql?jql=${encodeURIComponent(query)}&maxResults=${maxResults}&fields=summary,status,priority,assignee,reporter,issuetype,parent,sprint,description,attachment,comment,labels,components,created,updated`
   );
 }
 
@@ -127,7 +153,7 @@ export async function searchAllSprintIssues(
 
 export async function getIssue(key: string): Promise<JiraIssue> {
   return jiraFetch<JiraIssue>(
-    `/issue/${key}?fields=summary,status,priority,assignee,reporter,issuetype,parent,sprint,description,attachment,comment,labels,components`
+    `/issue/${key}?fields=summary,status,priority,assignee,reporter,issuetype,parent,sprint,description,attachment,comment,labels,components,issuelinks,subtasks,created,updated`
   );
 }
 
@@ -259,18 +285,7 @@ export interface CreateIssueParams {
 export async function createIssue(params: CreateIssueParams): Promise<JiraIssue> {
   const { summary, description, issueType = "Task", parentKey } = params;
 
-  const adf = params.descriptionAdf ?? {
-    type: "doc",
-    version: 1,
-    content: description.split("\n\n").map((block) => ({
-      type: "paragraph",
-      content: block.split("\n").flatMap((line, i, arr) => {
-        const nodes: any[] = [{ type: "text", text: line }];
-        if (i < arr.length - 1) nodes.push({ type: "hardBreak" });
-        return nodes;
-      }),
-    })),
-  };
+  const adf = params.descriptionAdf ?? markdownToAdf(description);
 
   const fields: Record<string, any> = {
     project: { key: config.jira.project },
@@ -295,6 +310,70 @@ export async function createIssue(params: CreateIssueParams): Promise<JiraIssue>
     method: "POST",
     body: JSON.stringify({ fields }),
   });
+}
+
+export interface UpdateIssueParams {
+  summary?: string;
+  /** Markdown */
+  description?: string;
+  addLabels?: string[];
+  removeLabels?: string[];
+}
+
+export async function updateIssue(
+  issueKey: string,
+  params: UpdateIssueParams
+): Promise<void> {
+  const fields: Record<string, any> = {};
+  const update: Record<string, any[]> = {};
+
+  if (params.summary !== undefined) fields.summary = params.summary;
+  if (params.description !== undefined) {
+    fields.description = markdownToAdf(params.description);
+  }
+
+  const labelOps = [
+    ...(params.addLabels ?? []).map((label) => ({ add: label })),
+    ...(params.removeLabels ?? []).map((label) => ({ remove: label })),
+  ];
+  if (labelOps.length) update.labels = labelOps;
+
+  await jiraFetch<void>(`/issue/${issueKey}`, {
+    method: "PUT",
+    body: JSON.stringify({ fields, update }),
+  });
+}
+
+export async function getIssueLinkTypes(): Promise<JiraIssueLinkType[]> {
+  const result = await jiraFetch<{ issueLinkTypes: JiraIssueLinkType[] }>(
+    "/issueLinkType"
+  );
+  return result.issueLinkTypes;
+}
+
+/**
+ * Creates a link that reads "<fromKey> <type.outward> <toKey>", for example
+ * "WEB-1 blocks WEB-2". Jira's create API names the sides the opposite way
+ * from how issues report their links: the issue doing the outward action goes
+ * in `inwardIssue`.
+ */
+export async function linkIssues(
+  typeName: string,
+  fromKey: string,
+  toKey: string
+): Promise<void> {
+  await jiraFetch<void>("/issueLink", {
+    method: "POST",
+    body: JSON.stringify({
+      type: { name: typeName },
+      inwardIssue: { key: fromKey },
+      outwardIssue: { key: toKey },
+    }),
+  });
+}
+
+export async function deleteIssueLink(linkId: string): Promise<void> {
+  await jiraFetch<void>(`/issueLink/${linkId}`, { method: "DELETE" });
 }
 
 export async function searchIssuesByText(
@@ -330,17 +409,6 @@ export async function addComment(
 ): Promise<void> {
   await jiraFetch<void>(`/issue/${issueKey}/comment`, {
     method: "POST",
-    body: JSON.stringify({
-      body: {
-        type: "doc",
-        version: 1,
-        content: [
-          {
-            type: "paragraph",
-            content: [{ type: "text", text }],
-          },
-        ],
-      },
-    }),
+    body: JSON.stringify({ body: markdownToAdf(text) }),
   });
 }
