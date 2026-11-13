@@ -1,5 +1,5 @@
 ---
-description: Jira CLI integration via JJ — fetches tickets and lists stories automatically
+description: Jira CLI integration via JJ — fetches, lists, and updates tickets
 alwaysApply: false
 ---
 
@@ -40,9 +40,21 @@ jj list --pipe --jql "your jql here"
 - `jj summary --pipe` — Slack-formatted sprint roundup for the whole team
 - `jj whois <name> --pipe` — Issues assigned to a person in the current sprint
 - `jj search <text> --pipe` — Search issues by summary text
+- `jj <KEY> --json` / `jj list --json` — Structured output (description and comments as markdown)
+- `jj list --all --pipe` — All of the user's open issues, not just this sprint
+
+## When the user asks to update a ticket
+
+Keys or bare numbers both work.
+
+- `jj move <KEY> <status>` — Move to any status (`jj transitions <KEY>` lists them); `jj ready <KEY>` moves to Review
+- `jj assign <KEY> [me|none|<name>]` — Assign (defaults to the user)
+- `jj edit <KEY> --summary "..." --description "..." --add-label x --remove-label y` — Edit fields (description is markdown; `-` reads stdin)
+- `jj link <KEY> <relation> <KEY>` / `jj unlink <KEY> <KEY>` — Link issues (`jj link 1234 blocks 1235`)
+- `jj comment <KEY> -m "text"` — Post a markdown comment (or pipe it on stdin)
 
 ## Notes
 
 - JJ reads credentials from `.env` in its install directory, or from env vars
-- The `--pipe` flag makes it non-interactive (no spinners, no prompts, clean stdout)
+- The `--pipe` and `--json` flags make it non-interactive (no prompts, clean stdout). Without a terminal, interactive commands exit with a hint instead of waiting.
 - Without `--pipe`, the CLI is interactive — only use `--pipe` in agent context

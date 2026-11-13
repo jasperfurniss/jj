@@ -62,24 +62,45 @@ cp .env.example .env  # fill in your credentials
 |---------|-------------|
 | `jj` | Interactive: list issues, select, view as markdown |
 | `jj <KEY>` | Fetch a specific issue (e.g., `jj WEB-1234`) |
+| `jj <KEY> --json` | The issue as JSON, with the description and comments as markdown |
 | `jj list` | List your assigned sprint issues |
+| `jj list --all` | All your open issues, not just this sprint |
 | `jj board` | Interactive kanban board — move cards between columns |
 | `jj sprint` | Sprint overview — all team issues grouped by status |
 | `jj sprint --by-person` | Sprint overview grouped by person |
 | `jj summary` | Sprint roundup — auto-copies Slack-formatted summary to clipboard |
 | `jj summary --concise` | Shorter format for quick updates |
-| `jj ready <number>` | Transition an issue to Review (e.g., `jj ready 1234`) |
+| `jj ready <KEY>` | Move an issue to Review (e.g., `jj ready 1234`) |
 | `jj move <KEY> <status>` | Move an issue to any status (e.g., `jj move 1234 in progress`, `jj move WEB-1234 done`) |
+| `jj transitions <KEY>` | List the statuses an issue can move to |
 | `jj assign <KEY> [who]` | Assign to `me` (default), a teammate by name, or `none` to unassign |
+| `jj edit <KEY> [flags]` | Edit `--summary`, `--description` (markdown, `-` for stdin), `--add-label`, `--remove-label` |
+| `jj link <KEY> <relation> <KEY>` | Link issues (e.g., `jj link 1234 blocks 1235`, `jj link 1235 is blocked by 1234`) |
+| `jj unlink <KEY> <KEY>` | Remove the links between two issues |
 | `jj open <KEY>` | Open issue in browser |
-| `jj comment <KEY>` | Post a comment (`-m "msg"` or opens $EDITOR) |
+| `jj comment <KEY>` | Comment in markdown (`-m "msg"`, piped stdin, or $EDITOR) |
 | `jj create` | Create an issue (`-m`, $EDITOR, or pipe from stdin) |
 | `jj clone <KEY>` | Clone an issue (keeps type, parent, labels) |
 | `jj whois <name>` | What's assigned to this person? |
 | `jj search <text>` | Search issues by summary |
-| `jj help` | Show all commands |
+| `jj help` | Show all commands (`--help` and `-h` work too) |
+| `jj --version` | Print the installed version |
 
-Most commands support `--pipe` for non-interactive, machine-readable output.
+Anywhere a command takes `<KEY>`, a bare number works too: `jj move 1234 done` uses your `JIRA_PROJECT`.
+
+Most read commands support `--pipe` for plain text and `--json` for structured output.
+
+### Writing in markdown
+
+Comments, descriptions from `jj edit`, and new issues from `jj create` are written in markdown and converted to Jira's rich text: headings, **bold**, *italic*, ~~strike~~, `inline code`, links, nested lists, code blocks, quotes, rules, and tables.
+
+```bash
+jj comment WEB-1234 -m "Fixed in [#42](https://github.com/acme/app/pull/42). Still to do:
+- Update the docs
+- Ship it"
+
+cat notes.md | jj edit WEB-1234 --description -
+```
 
 ## For Product Managers
 
@@ -94,7 +115,7 @@ JJ is built for developers *and* PMs. The sprint management commands are designe
 
 JJ comes with agent skills that make working with Jira a breeze in AI coding assistants.
 
-JJ's `--pipe` mode outputs clean markdown to stdout, making it a perfect tool for AI agents. When your agent sees a Jira issue key like `WEB-1234`, it can automatically fetch the full ticket context.
+JJ's `--pipe` mode outputs clean markdown to stdout, and `--json` outputs structured issues, making it a perfect tool for AI agents. When your agent sees a Jira issue key like `WEB-1234`, it can fetch the full ticket context, then update it: move it, assign it, edit it, link it, and comment in markdown. Without a terminal, JJ skips the banner and never waits on an interactive prompt.
 
 ### Cursor
 
@@ -128,6 +149,10 @@ All configuration is via environment variables in `.env`. See `.env.example` for
 | `JJ_COLUMNS` | `["To Do","In Progress","Review","Done"]` | Board column names (JSON) |
 | `JJ_STATUS_MAP` | See `.env.example` | Status-to-column mapping (JSON) |
 | `JJ_COLUMN_TRANSITIONS` | See `.env.example` | Transition name candidates (JSON) |
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
