@@ -13,7 +13,11 @@ import {
   createIssue,
   searchIssuesByText,
   searchByAssignee,
+  getMyself,
+  findAssignableUsers,
+  assignIssue,
 } from "./jira-client.js";
+import { normalizeIssueKey, findTransitions, findUsers } from "./resolve.js";
 import { issueToMarkdown } from "./converter.js";
 import { runSprint } from "./sprint.js";
 import { runSummary } from "./summary.js";
@@ -155,6 +159,87 @@ async function readyMode(ticketNumber: string) {
     await transitionIssue(issueKey, reviewTransition.id);
     s.stop(`${issueKey} moved to ${targetName}`);
     p.log.success(pc.green(`${issueKey} is now in ${targetName}`));
+  } catch (e: any) {
+    s.stop("Failed");
+    p.log.error(e.message);
+    process.exit(1);
+  }
+}
+
+async function moveMode(issueKey: string, target: string) {
+  validateConfig();
+
+  const s = p.spinner();
+  s.start(`Moving ${issueKey} to ${target}...`);
+
+  try {
+    const transitions = await getTransitions(issueKey);
+    const matches = findTransitions(transitions, target);
+
+    if (matches.length !== 1) {
+      const options = (matches.length ? matches : transitions)
+        .map((t) => (t.to?.name && t.to.name !== t.name ? `${t.name} (→ ${t.to.name})` : t.name))
+        .join(", ");
+      s.stop("Failed");
+      p.log.error(
+        matches.length
+          ? `"${target}" matches more than one transition for ${issueKey}: ${options}`
+          : `No "${target}" transition available for ${issueKey}.\nAvailable: ${options}`
+      );
+      process.exit(1);
+    }
+
+    const [transition] = matches;
+    const statusName = transition.to?.name ?? transition.name;
+
+    await transitionIssue(issueKey, transition.id);
+    s.stop(`${issueKey} moved to ${statusName}`);
+    p.log.success(pc.green(`${issueKey} is now in ${statusName}`));
+  } catch (e: any) {
+    s.stop("Failed");
+    p.log.error(e.message);
+    process.exit(1);
+  }
+}
+
+async function assignMode(issueKey: string, who: string) {
+  validateConfig();
+
+  const s = p.spinner();
+  s.start(`Assigning ${issueKey}...`);
+
+  try {
+    const query = who.trim().toLowerCase();
+    let accountId: string | null;
+    let name: string;
+
+    if (query === "none" || query === "unassigned") {
+      accountId = null;
+      name = "Unassigned";
+    } else if (query === "me") {
+      const me = await getMyself();
+      accountId = me.accountId;
+      name = me.displayName;
+    } else {
+      const users = findUsers(await findAssignableUsers(issueKey, who), who);
+
+      if (users.length !== 1) {
+        s.stop("Failed");
+        p.log.error(
+          users.length
+            ? `"${who}" matches more than one person: ${users.map((u) => u.displayName).join(", ")}`
+            : `No assignable user matches "${who}" for ${issueKey}.`
+        );
+        process.exit(1);
+      }
+
+      accountId = users[0].accountId;
+      name = users[0].displayName;
+    }
+
+    await assignIssue(issueKey, accountId);
+    s.stop(`${issueKey} assigned`);
+    p.log.success(pc.green(`${issueKey} is now assigned to ${name}`));
   } catch (e: any) {
     s.stop("Failed");
     p.log.error(e.message);
@@ -510,6 +595,8 @@ async function main() {
       "  │ jj summary                   │ Sprint roundup (auto-copies Slack format to clipboard)  │",
       "  │ jj summary --concise         │ Concise format (grouped by role)                       │",
       "  │ jj ready <number>            │ Transition issue to Review (e.g. jj ready 1234)       │",
+      "  │ jj move <KEY> <status>       │ Move issue to any status (e.g. jj move 1234 done)     │",
+      "  │ jj assign <KEY> [who]        │ Assign to me (default), a name, or none               │",
       "  │ jj open [KEY]                │ Open issue in browser                                  │",
       "  │ jj comment [KEY]             │ Post a comment (-m \"msg\" or opens $EDITOR)             │",
       "  │ jj create                    │ Create issue (-m, $EDITOR, or pipe from stdin)         │",
@@ -718,6 +805,30 @@ async function main() {
     const inlineMessage = mIdx !== -1 ? args[mIdx + 1] : undefined;
 
     await commentMode(key, inlineMessage);
+    return;
+  }
+
+  // move mode: `jj move WEB-1823 in progress` or `jj move 1823 done`
+  if (args[0] === "move") {
+    const issueKey = args[1] ? normalizeIssueKey(args[1], config.jira.project) : null;
+    const target = args.slice(2).filter((a) => !a.startsWith("-")).join(" ");
+    if (!issueKey || !target) {
+      console.error("Usage: jj move <KEY|number> <status>  e.g. jj move 1823 in progress");
+      process.exit(1);
+    }
+    await moveMode(issueKey, target);
+    return;
+  }
+
+  // assign mode: `jj assign WEB-1823` (me), `jj assign 1823 nathan`, `jj assign 1823 none`
+  if (args[0] === "assign") {
+    const issueKey = args[1] ? normalizeIssueKey(args[1], config.jira.project) : null;
+    const who = args.slice(2).filter((a) => !a.startsWith("-")).join(" ") || "me";
+    if (!issueKey) {
+      console.error("Usage: jj assign <KEY|number> [me|none|<name>]  e.g. jj assign 1823");
+      process.exit(1);
+    }
+    await assignMode(issueKey, who);
     return;
   }
 

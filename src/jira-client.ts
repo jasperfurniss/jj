@@ -50,6 +50,15 @@ export interface JiraSearchResult {
 export interface JiraTransition {
   id: string;
   name: string;
+  /** The status this transition moves the issue to */
+  to?: { name: string };
+}
+
+export interface JiraUser {
+  accountId: string;
+  displayName: string;
+  emailAddress?: string;
+  active?: boolean;
 }
 
 export interface JiraTransitionsResult {
@@ -180,6 +189,29 @@ export async function transitionIssue(
   await jiraFetch<void>(`/issue/${issueKey}/transitions`, {
     method: "POST",
     body: JSON.stringify({ transition: { id: transitionId } }),
+  });
+}
+
+export async function getMyself(): Promise<JiraUser> {
+  return jiraFetch<JiraUser>("/myself");
+}
+
+export async function findAssignableUsers(
+  issueKey: string,
+  query: string
+): Promise<JiraUser[]> {
+  const params = new URLSearchParams({ issueKey, query, maxResults: "20" });
+  return jiraFetch<JiraUser[]>(`/user/assignable/search?${params}`);
+}
+
+/** Pass null to unassign. */
+export async function assignIssue(
+  issueKey: string,
+  accountId: string | null
+): Promise<void> {
+  await jiraFetch<void>(`/issue/${issueKey}/assignee`, {
+    method: "PUT",
+    body: JSON.stringify({ accountId }),
   });
 }
 

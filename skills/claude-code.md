@@ -28,4 +28,11 @@ Other useful commands:
 - `jj whois <name> --pipe` — Issues assigned to a person
 - `jj search <text> --pipe` — Search issues by summary
 
+To update issues (keys or bare numbers both work):
+
+- `jj ready <number>` — Move to Review
+- `jj move <KEY> <status>` — Move to any status, matched by transition or status name (e.g. `jj move 1234 done`)
+- `jj assign <KEY> [me|none|<name>]` — Assign (defaults to me)
+- `jj comment <KEY> -m "text"` — Post a plain-text comment
+
 Always use `--pipe` in agent context for non-interactive output.

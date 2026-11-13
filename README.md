@@ -69,6 +69,8 @@ cp .env.example .env  # fill in your credentials
 | `jj summary` | Sprint roundup — auto-copies Slack-formatted summary to clipboard |
 | `jj summary --concise` | Shorter format for quick updates |
 | `jj ready <number>` | Transition an issue to Review (e.g., `jj ready 1234`) |
+| `jj move <KEY> <status>` | Move an issue to any status (e.g., `jj move 1234 in progress`, `jj move WEB-1234 done`) |
+| `jj assign <KEY> [who]` | Assign to `me` (default), a teammate by name, or `none` to unassign |
 | `jj open <KEY>` | Open issue in browser |
 | `jj comment <KEY>` | Post a comment (`-m "msg"` or opens $EDITOR) |
 | `jj create` | Create an issue (`-m`, $EDITOR, or pipe from stdin) |
