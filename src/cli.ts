@@ -20,9 +20,11 @@ import {
   getIssueLinkTypes,
   linkIssues,
   deleteIssueLink,
+  moveIssuesToSprint,
 } from "./jira-client.js";
 import {
   normalizeIssueKey,
+  normalizeIssueKeys,
   findTransitions,
   findUsers,
   findLinkRelations,
@@ -293,6 +295,31 @@ async function assignMode(issueKey: string, who: string) {
     await assignIssue(issueKey, accountId);
     s.stop(`${issueKey} assigned`);
     p.log.success(pc.green(`${issueKey} is now assigned to ${name}`));
+  } catch (e: any) {
+    s.stop("Failed");
+    p.log.error(e.message);
+    process.exit(1);
+  }
+}
+
+async function sprintAddMode(issueKeys: string[]) {
+  validateConfig();
+
+  const s = p.spinner();
+  s.start(`Moving ${issueKeys.join(", ")} into the active sprint...`);
+
+  try {
+    const sprint = await getActiveSprint(config.jira.boardId);
+
+    if (!sprint) {
+      s.stop("Failed");
+      p.log.error(`Board ${config.jira.boardId} has no active sprint.`);
+      process.exit(1);
+    }
+
+    await moveIssuesToSprint(sprint.id, issueKeys);
+    s.stop("Moved");
+    p.log.success(pc.green(`${issueKeys.join(", ")} now in ${sprint.name}`));
   } catch (e: any) {
     s.stop("Failed");
     p.log.error(e.message);
@@ -759,6 +786,7 @@ const HELP_ROWS: [string, string][] = [
   ["jj board", "Interactive kanban board (move cards between columns)"],
   ["jj sprint", "Sprint overview (issues by status + assignee)"],
   ["jj sprint --by-person", "Sprint overview grouped by person"],
+  ["jj sprint add <KEY...>", "Move issues into the active sprint"],
   ["jj summary", "Sprint roundup (auto-copies Slack format to clipboard)"],
   ["jj summary --concise", "Concise format (grouped by role)"],
   ["jj ready <KEY>", "Move issue to Review (e.g. jj ready 1234)"],
@@ -857,6 +885,19 @@ async function main() {
       parent: flagVal("--parent"),
       pipe: isPipe,
     });
+    return;
+  }
+
+  // sprint add mode: `jj sprint add 9972` or `jj sprint add WEB-9972 WEB-9973`
+  if (args[0] === "sprint" && args[1] === "add") {
+    const inputs = args.slice(2).filter((a) => !a.startsWith("-"));
+    const { keys, invalid } = normalizeIssueKeys(inputs, config.jira.project);
+    if (keys.length === 0 || invalid.length > 0) {
+      if (invalid.length > 0) console.error(`Not an issue key: ${invalid.join(", ")}`);
+      console.error("Usage: jj sprint add <KEY|number> [...]  e.g. jj sprint add 1823");
+      process.exit(1);
+    }
+    await sprintAddMode(keys);
     return;
   }
 

@@ -37,6 +37,7 @@ To update issues (keys or bare numbers both work):
 - `jj move <KEY> <status>` — Move to any status, matched by transition or status name (e.g. `jj move 1234 done`)
 - `jj transitions <KEY>` — List the statuses an issue can move to
 - `jj assign <KEY> [me|none|<name>]` — Assign (defaults to me)
+- `jj sprint add <KEY...>` — Move one or more issues into the active sprint
 - `jj edit <KEY> --summary "..." --description "..." --add-label x --remove-label y` — Edit fields (description is markdown; `-` reads stdin)
 - `jj link <KEY> <relation> <KEY>` / `jj unlink <KEY> <KEY>` — Link issues (e.g. `jj link 1234 blocks 1235`)
 - `jj comment <KEY> -m "text"` — Post a markdown comment (or pipe it on stdin)

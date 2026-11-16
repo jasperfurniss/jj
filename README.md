@@ -68,6 +68,7 @@ cp .env.example .env  # fill in your credentials
 | `jj board` | Interactive kanban board — move cards between columns |
 | `jj sprint` | Sprint overview — all team issues grouped by status |
 | `jj sprint --by-person` | Sprint overview grouped by person |
+| `jj sprint add <KEY...>` | Move one or more issues into the active sprint |
 | `jj summary` | Sprint roundup — auto-copies Slack-formatted summary to clipboard |
 | `jj summary --concise` | Shorter format for quick updates |
 | `jj ready <KEY>` | Move an issue to Review (e.g., `jj ready 1234`) |

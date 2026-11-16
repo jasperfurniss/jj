@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { normalizeIssueKey, findTransitions, findUsers, findLinkRelations } from "../src/resolve.js";
+import {
+  normalizeIssueKey,
+  normalizeIssueKeys,
+  findTransitions,
+  findUsers,
+  findLinkRelations,
+} from "../src/resolve.js";
 
 describe("normalizeIssueKey", () => {
   it("prefixes a bare number with the project key", () => {
@@ -119,5 +125,28 @@ describe("findLinkRelations", () => {
 
   it("returns nothing when no type matches", () => {
     expect(describeAll("depends on")).toEqual([]);
+  });
+});
+
+describe("normalizeIssueKeys", () => {
+  it("normalizes keys and bare numbers", () => {
+    expect(normalizeIssueKeys(["9972", "web-9973", "APP-12"], "WEB")).toEqual({
+      keys: ["WEB-9972", "WEB-9973", "APP-12"],
+      invalid: [],
+    });
+  });
+
+  it("drops duplicates, including a number and its key", () => {
+    expect(normalizeIssueKeys(["9972", "WEB-9972"], "WEB")).toEqual({
+      keys: ["WEB-9972"],
+      invalid: [],
+    });
+  });
+
+  it("reports anything that is not a key", () => {
+    expect(normalizeIssueKeys(["9972", "next", "WEB-"], "WEB")).toEqual({
+      keys: ["WEB-9972"],
+      invalid: ["next", "WEB-"],
+    });
   });
 });

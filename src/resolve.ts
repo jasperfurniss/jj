@@ -13,6 +13,27 @@ export function normalizeIssueKey(input: string, project: string): string | null
   return null;
 }
 
+/**
+ * Normalizes a list of issue keys or bare numbers, dropping duplicates.
+ * Anything that is not a key comes back in `invalid` so the caller can
+ * report it instead of silently skipping it.
+ */
+export function normalizeIssueKeys(
+  inputs: string[],
+  project: string
+): { keys: string[]; invalid: string[] } {
+  const keys: string[] = [];
+  const invalid: string[] = [];
+
+  for (const input of inputs) {
+    const key = normalizeIssueKey(input, project);
+    if (!key) invalid.push(input);
+    else if (!keys.includes(key)) keys.push(key);
+  }
+
+  return { keys, invalid };
+}
+
 function normalizeName(value: string): string {
   return value.toLowerCase().replace(/[\s_-]+/g, " ").trim();
 }

@@ -272,6 +272,16 @@ export async function getActiveSprint(boardId: number): Promise<JiraSprint | nul
   return result.values[0] ?? null;
 }
 
+export async function moveIssuesToSprint(
+  sprintId: number,
+  issueKeys: string[]
+): Promise<void> {
+  await jiraAgileFetch<void>(`/sprint/${sprintId}/issue`, {
+    method: "POST",
+    body: JSON.stringify({ issues: issueKeys }),
+  });
+}
+
 export interface CreateIssueParams {
   summary: string;
   description: string;
