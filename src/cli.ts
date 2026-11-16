@@ -21,6 +21,7 @@ import {
   linkIssues,
   deleteIssueLink,
   moveIssuesToSprint,
+  type JiraUser,
 } from "./jira-client.js";
 import {
   normalizeIssueKey,
@@ -481,7 +482,30 @@ async function openMode(issueKey: string) {
   p.log.success(`Opened ${pc.cyan(issueKey)} in browser`);
 }
 
-async function commentMode(issueKey: string, inlineMessage?: string) {
+/** Each name must match exactly one person who can be assigned the issue. */
+async function resolveCcUsers(issueKey: string, names: string[]): Promise<JiraUser[]> {
+  const users: JiraUser[] = [];
+
+  for (const name of names) {
+    const matches = findUsers(await findAssignableUsers(issueKey, name), name);
+
+    if (matches.length !== 1) {
+      p.log.error(
+        matches.length
+          ? `"${name}" matches more than one person: ${matches.map((u) => u.displayName).join(", ")}`
+          : `No assignable user matches "${name}" for ${issueKey}.`
+      );
+      process.exit(1);
+    }
+
+    if (!users.some((u) => u.accountId === matches[0].accountId)) users.push(matches[0]);
+  }
+
+  return users;
+}
+
+async function commentMode(issueKey: string, inlineMessage?: string, ccNames: string[] = []) {
+  const cc = await resolveCcUsers(issueKey, ccNames);
   let body: string;
 
   if (inlineMessage) {
@@ -513,7 +537,7 @@ async function commentMode(issueKey: string, inlineMessage?: string) {
 
   const s = p.spinner();
   s.start(`Posting comment to ${issueKey}...`);
-  await addComment(issueKey, body);
+  await addComment(issueKey, body, cc);
   s.stop("Comment posted");
   p.log.success(pc.green(`Comment added to ${pc.cyan(issueKey)}`));
 }
@@ -797,6 +821,7 @@ const HELP_ROWS: [string, string][] = [
   ["jj link <KEY> <rel> <KEY>", "Link issues (e.g. jj link 1 blocks 2)"],
   ["jj unlink <KEY> <KEY>", "Remove the links between two issues"],
   ["jj comment [KEY]", "Comment in markdown (-m, stdin, or $EDITOR)"],
+  ["jj comment <KEY> --cc <name>", "Mention people at the end (repeatable)"],
   ["jj open [KEY]", "Open issue in browser"],
   ["jj create", "Create issue (-m, $EDITOR, or pipe from stdin)"],
   ["jj clone <KEY>", "Clone an issue (keeps type, parent, labels)"],
@@ -1043,7 +1068,7 @@ async function main() {
     return;
   }
 
-  // comment mode: `jj comment [WEB-1234] [-m "message"]`
+  // comment mode: `jj comment [WEB-1234] [-m "message"] [--cc name]`
   if (args[0] === "comment") {
     printBanner();
     validateConfig();
@@ -1060,7 +1085,7 @@ async function main() {
     const mIdx = args.indexOf("-m");
     const inlineMessage = mIdx !== -1 ? args[mIdx + 1] : undefined;
 
-    await commentMode(key, inlineMessage);
+    await commentMode(key, inlineMessage, flagValues(args, "--cc"));
     return;
   }
 

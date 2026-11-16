@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { markdownToAdf, parseInline } from "../src/markdown-adf.js";
+import { ccParagraph, markdownToAdf, parseInline } from "../src/markdown-adf.js";
 import { adfToMarkdown } from "../src/converter.js";
 
 const text = (value: string, marks?: any[]) => ({
@@ -112,5 +112,35 @@ describe("markdownToAdf", () => {
     "| A | B |\n| --- | --- |\n| 1 | 2 |",
   ])("round-trips through adfToMarkdown: %s", (markdown) => {
     expect(adfToMarkdown(markdownToAdf(markdown)).trim()).toBe(markdown);
+  });
+});
+
+describe("ccParagraph", () => {
+  it("mentions each person after a cc label", () => {
+    expect(
+      ccParagraph([
+        { accountId: "a1", displayName: "Ada Lovelace" },
+        { accountId: "b2", displayName: "Grace Hopper" },
+      ])
+    ).toEqual({
+      type: "paragraph",
+      content: [
+        text("cc:"),
+        text(" "),
+        { type: "mention", attrs: { id: "a1", text: "@Ada Lovelace" } },
+        text(" "),
+        { type: "mention", attrs: { id: "b2", text: "@Grace Hopper" } },
+      ],
+    });
+  });
+
+  it("reads back as @names in markdown", () => {
+    const doc = {
+      type: "doc",
+      version: 1,
+      content: [ccParagraph([{ accountId: "a1", displayName: "Ada Lovelace" }])],
+    };
+
+    expect(adfToMarkdown(doc).trim()).toBe("cc: @Ada Lovelace");
   });
 });

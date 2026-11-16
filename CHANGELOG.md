@@ -7,10 +7,12 @@ All notable changes to JJ are documented here. The format follows [Keep a Change
 ### Added
 
 - `jj sprint add <KEY...>` moves one or more issues into the board's active sprint.
+- `jj comment --cc <name>` mentions people at the end of a comment, so Jira notifies them. Repeat it for each person.
 - CI runs the typecheck, tests, and build on every push and pull request.
 
 ### Fixed
 
+- Mentions no longer read back as `@@Name`, since Jira already starts the mention text with `@`.
 - `jj open`, `jj clone`, and viewing an issue interactively (`jj 1234`) accept a bare issue number, like every other command.
 
 ## [1.2.0] - 2026-11-12

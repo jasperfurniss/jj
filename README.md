@@ -80,6 +80,7 @@ cp .env.example .env  # fill in your credentials
 | `jj unlink <KEY> <KEY>` | Remove the links between two issues |
 | `jj open <KEY>` | Open issue in browser |
 | `jj comment <KEY>` | Comment in markdown (`-m "msg"`, piped stdin, or $EDITOR) |
+| `jj comment <KEY> --cc <name>` | Mention people at the end of the comment so Jira notifies them (repeatable) |
 | `jj create` | Create an issue (`-m`, $EDITOR, or pipe from stdin) |
 | `jj clone <KEY>` | Clone an issue (keeps type, parent, labels) |
 | `jj whois <name>` | What's assigned to this person? |

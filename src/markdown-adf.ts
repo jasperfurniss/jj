@@ -17,6 +17,28 @@ export function markdownToAdf(markdown: string): AdfNode {
   return { type: "doc", version: 1, content: parseBlocks(lines) };
 }
 
+/**
+ * Builds a "cc:" paragraph of Jira user mentions. Jira only notifies people
+ * through mention nodes, which Markdown has no syntax for.
+ */
+export function ccParagraph(
+  users: { accountId: string; displayName: string }[]
+): AdfNode {
+  return {
+    type: "paragraph",
+    content: [
+      { type: "text", text: "cc:" },
+      ...users.flatMap((user) => [
+        { type: "text", text: " " },
+        {
+          type: "mention",
+          attrs: { id: user.accountId, text: `@${user.displayName}` },
+        },
+      ]),
+    ],
+  };
+}
+
 const FENCE = /^\s*```\s*([\w+-]*)\s*$/;
 const HEADING = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
 const RULE = /^\s*([-*_])(\s*\1){2,}\s*$/;

@@ -109,7 +109,8 @@ export function adfToMarkdown(node: any, depth = 0, listIndex?: number): string 
     case "emoji":
       return node.attrs?.shortName || "";
     case "mention":
-      return `@${node.attrs?.text || "user"}`;
+      // Jira stores the mention text with its own leading "@".
+      return `@${(node.attrs?.text || "user").replace(/^@/, "")}`;
     case "hardBreak":
       return "\n";
     default:

@@ -1,5 +1,5 @@
 import { config } from "./config.js";
-import { markdownToAdf } from "./markdown-adf.js";
+import { ccParagraph, markdownToAdf } from "./markdown-adf.js";
 import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { join, resolve } from "path";
 
@@ -413,12 +413,17 @@ export async function searchByAssignee(
   return { issues: filtered };
 }
 
+/** Users in `cc` are mentioned at the end of the comment, which notifies them. */
 export async function addComment(
   issueKey: string,
-  text: string
+  text: string,
+  cc: JiraUser[] = []
 ): Promise<void> {
+  const body = markdownToAdf(text);
+  if (cc.length) body.content.push(ccParagraph(cc));
+
   await jiraFetch<void>(`/issue/${issueKey}/comment`, {
     method: "POST",
-    body: JSON.stringify({ body: markdownToAdf(text) }),
+    body: JSON.stringify({ body }),
   });
 }

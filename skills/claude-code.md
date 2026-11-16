@@ -41,5 +41,6 @@ To update issues (keys or bare numbers both work):
 - `jj edit <KEY> --summary "..." --description "..." --add-label x --remove-label y` — Edit fields (description is markdown; `-` reads stdin)
 - `jj link <KEY> <relation> <KEY>` / `jj unlink <KEY> <KEY>` — Link issues (e.g. `jj link 1234 blocks 1235`)
 - `jj comment <KEY> -m "text"` — Post a markdown comment (or pipe it on stdin)
+- `jj comment <KEY> -m "text" --cc <name> --cc <name>` — Mention people at the end of the comment so Jira notifies them
 
 Always use `--pipe` in agent context for non-interactive output.
